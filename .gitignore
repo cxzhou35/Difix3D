@@ -4,6 +4,7 @@ inputs/*
 outputs/*
 results/*
 checkpoints/*
+eval/*
 models/*
 
 *.png

@@ -99,12 +99,12 @@ def main():
         # save image
         output_image.save(
             join(
-                output_dir,
+                output_img_dir,
                 os.path.basename(input_image_path),
             )
         )
 
-    # save output videos
+    # save output video
     if len(output_images) > 1:
         imageio.mimwrite(
             join(output_dir, "output_video.mp4"),

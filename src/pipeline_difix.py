@@ -1064,8 +1064,8 @@ class DifixPipeline(
             )
 
         # 0. Default height and width to unet
-        height = height or self.unet.config.sample_size * self.vae_scale_factor
-        width = width or self.unet.config.sample_size * self.vae_scale_factor
+        height = height or self.unet.config.sample_size * self.vae_scale_factor  # 512
+        width = width or self.unet.config.sample_size * self.vae_scale_factor  # 512
         # to deal with lora scaling and other possible forward hooks
 
         # 1. Check inputs. Raise error if not correct
@@ -1133,6 +1133,8 @@ class DifixPipeline(
             if self.do_classifier_free_guidance:
                 image_embeds = torch.cat([negative_image_embeds, image_embeds])
 
+        # note: normalized image is in range [-1, 1]
+        # note: the image size is multiples of vae_scale_factor
         image = self.image_processor.preprocess(image)
         if ref_image is not None:
             ref_image = self.image_processor.preprocess(ref_image)

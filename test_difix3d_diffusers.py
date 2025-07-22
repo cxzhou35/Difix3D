@@ -49,8 +49,13 @@ def main():
         else:
             ref_image_paths = [args.ref_image]
 
-        assert len(input_image_paths) == len(
-            ref_image_paths
+        if len(ref_image_paths) < len(input_image_paths):
+            ref_image_paths = ref_image_paths * (
+                len(input_image_paths) // len(ref_image_paths)
+            )
+
+        assert len(ref_image_paths) == len(
+            input_image_paths
         ), "Number of input images and reference images should be the same"
 
     output_dir = ""

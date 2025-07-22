@@ -1,9 +1,11 @@
 import json
 import math
 import os
+import random
 import time
-from dataclasses import dataclass, field
 from collections import defaultdict
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
 import imageio
@@ -15,35 +17,27 @@ import tqdm
 import tyro
 import viser
 import yaml
-import random
-from PIL import Image
-from copy import deepcopy
 from datasets.colmap import Dataset, Parser
 from datasets.traj import (
-    generate_interpolated_path,
     generate_ellipse_path_z,
+    generate_interpolated_path,
     generate_spiral_path,
 )
+from fused_ssim import fused_ssim
+from gsplat.compression import PngCompression
+from gsplat.distributed import cli
+from gsplat.optimizers import SelectiveAdam
+from gsplat.rendering import rasterization
+from gsplat.strategy import DefaultStrategy, MCMCStrategy
+from lib_bilagrid import BilateralGrid, color_correct, slice, total_variation_loss
+from PIL import Image
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
-from fused_ssim import fused_ssim
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from typing_extensions import Literal, assert_never
 from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_random_seed
-from lib_bilagrid import (
-    BilateralGrid,
-    slice,
-    color_correct,
-    total_variation_loss,
-)
-
-from gsplat.compression import PngCompression
-from gsplat.distributed import cli
-from gsplat.rendering import rasterization
-from gsplat.strategy import DefaultStrategy, MCMCStrategy
-from gsplat.optimizers import SelectiveAdam
 
 from examples.utils import CameraPoseInterpolator
 from src.pipeline_difix import DifixPipeline
@@ -52,7 +46,7 @@ from src.pipeline_difix import DifixPipeline
 @dataclass
 class Config:
     # Disable viewer
-    disable_viewer: bool = True # ! turn off viser
+    disable_viewer: bool = True  # ! turn off viser
     # Path to the .pt files. If provide, it will skip training and run evaluation only.
     ckpt: Optional[List[str]] = None
     # Name of compression strategy to use
@@ -88,11 +82,66 @@ class Config:
     # Number of training steps
     max_steps: int = 60_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [1_0000, 2_0000, 3_0000, 3_5000, 4_0000, 4_5000, 5_0000, 5_5000, 6_0000])
+    eval_steps: List[int] = field(
+        default_factory=lambda: [
+            1_0000,
+            2_0000,
+            3_0000,
+            3_5000,
+            4_0000,
+            4_5000,
+            5_0000,
+            5_5000,
+            6_0000,
+        ]
+    )
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [1_0000, 2_0000, 3_0000, 4_0000, 4_5000, 5_0000, 5_5000, 6_0000])
+    save_steps: List[int] = field(
+        default_factory=lambda: [
+            1_0000,
+            2_0000,
+            3_0000,
+            4_0000,
+            4_5000,
+            5_0000,
+            5_5000,
+            6_0000,
+        ]
+    )
     # Steps to fix the artifacts
-    fix_steps: List[int] = field(default_factory=lambda: [3_000, 6_000, 8_000, 10_000, 12_000, 14_000, 16_000, 18_000, 20_000, 22_000, 24_000, 26_000, 28_000, 30_000, 32_000, 34_000, 36_000, 38_000, 40_000, 42_000, 44_000, 46_000, 48_000, 50_000, 52_000, 54_000, 56_000, 58_000, 60_000])
+    fix_steps: List[int] = field(
+        default_factory=lambda: [
+            3_000,
+            6_000,
+            8_000,
+            10_000,
+            12_000,
+            14_000,
+            16_000,
+            18_000,
+            20_000,
+            22_000,
+            24_000,
+            26_000,
+            28_000,
+            30_000,
+            32_000,
+            34_000,
+            36_000,
+            38_000,
+            40_000,
+            42_000,
+            44_000,
+            46_000,
+            48_000,
+            50_000,
+            52_000,
+            54_000,
+            56_000,
+            58_000,
+            60_000,
+        ]
+    )
 
     # Initialization strategy
     init_type: str = "sfm"
@@ -449,18 +498,22 @@ class Runner:
                 render_fn=self._viewer_render_fn,
                 mode="training",
             )
-            
-        # Fixer trajectory 
-        self.interpolator = CameraPoseInterpolator(rotation_weight=1.0, translation_weight=1.0)
+
+        # Fixer trajectory
+        self.interpolator = CameraPoseInterpolator(
+            rotation_weight=1.0, translation_weight=1.0
+        )
 
         self.current_novel_poses = self.parser.camtoworlds[self.trainset.indices]
         self.current_parser = self.parser
 
         self.novelloaders = []
         self.novelloaders_iter = []
-        
+
         # Diffusion fixer
-        self.difix = DifixPipeline.from_pretrained("nvidia/difix_ref", trust_remote_code=True)
+        self.difix = DifixPipeline.from_pretrained(
+            "nvidia/difix_ref", trust_remote_code=True
+        )
         self.difix.set_progress_bar_config(disable=True)
         self.difix.to("cuda")
 
@@ -594,7 +647,7 @@ class Runner:
                     data = next(self.novelloaders_iter[-1])
                 except StopIteration:
                     self.novelloaders_iter[-1] = iter(self.novelloaders[-1])
-                    data = next(self.novelloaders_iter[-1])        
+                    data = next(self.novelloaders_iter[-1])
                 is_novel_data = True
 
             camtoworlds = camtoworlds_gt = data["camtoworld"].to(device)  # [1, 4, 4]
@@ -605,7 +658,9 @@ class Runner:
             )
             image_ids = data["image_id"].to(device)
             masks = data["mask"].to(device) if "mask" in data else None  # [1, H, W]
-            alpha_masks = data["alpha_mask"].to(device) if "alpha_mask" in data else None  # [1, H, W, 1]
+            alpha_masks = (
+                data["alpha_mask"].to(device) if "alpha_mask" in data else None
+            )  # [1, H, W, 1]
             if cfg.depth_loss:
                 points = data["points"].to(device)  # [1, M, 2]
                 depths_gt = data["depths"].to(device)  # [1, M]
@@ -840,7 +895,7 @@ class Runner:
             # run fixer
             if step in [i - 1 for i in cfg.fix_steps]:
                 self.fix(step)
-            
+
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
                 self.run_compression(step=step)
@@ -855,45 +910,75 @@ class Runner:
                 self.viewer.state.num_train_rays_per_sec = num_train_rays_per_sec
                 # Update the scene.
                 self.viewer.update(step, num_train_rays_per_step)
-    
+
     @torch.no_grad()
     def fix(self, step: int):
         print("Running fixer...")
         if len(self.cfg.fix_steps) == 1:
             novel_poses = self.parser.camtoworlds[self.valset.indices]
         else:
-            novel_poses = self.interpolator.shift_poses(self.current_novel_poses, self.parser.camtoworlds[self.valset.indices], distance=0.5)
-        
+            novel_poses = self.interpolator.shift_poses(
+                self.current_novel_poses,
+                self.parser.camtoworlds[self.valset.indices],
+                distance=0.5,
+            )
+
         self.render_traj(step, novel_poses)
-        image_paths = [f"{self.render_dir}/novel/{step}/Pred/{i:04d}.png" for i in range(len(novel_poses))]
+        image_paths = [
+            f"{self.render_dir}/novel/{step}/Pred/{i:04d}.png"
+            for i in range(len(novel_poses))
+        ]
 
         if len(self.novelloaders) == 0:
-            ref_image_indices = self.interpolator.find_nearest_assignments(self.parser.camtoworlds[self.trainset.indices], novel_poses)
-            ref_image_paths = [self.parser.image_paths[i] for i in np.array(self.trainset.indices)[ref_image_indices]]
+            ref_image_indices = self.interpolator.find_nearest_assignments(
+                self.parser.camtoworlds[self.trainset.indices], novel_poses
+            )
+            ref_image_paths = [
+                self.parser.image_paths[i]
+                for i in np.array(self.trainset.indices)[ref_image_indices]
+            ]
         else:
-            ref_image_indices = self.interpolator.find_nearest_assignments(self.parser.camtoworlds[self.trainset.indices], novel_poses)
-            ref_image_paths = [self.parser.image_paths[i] for i in np.array(self.trainset.indices)[ref_image_indices]]
+            ref_image_indices = self.interpolator.find_nearest_assignments(
+                self.parser.camtoworlds[self.trainset.indices], novel_poses
+            )
+            ref_image_paths = [
+                self.parser.image_paths[i]
+                for i in np.array(self.trainset.indices)[ref_image_indices]
+            ]
         assert len(image_paths) == len(ref_image_paths) == len(novel_poses)
 
         for i in tqdm.trange(0, len(novel_poses), desc="Fixing artifacts..."):
             image = Image.open(image_paths[i]).convert("RGB")
             ref_image = Image.open(ref_image_paths[i]).convert("RGB")
-            output_image = self.difix(prompt="remove degradation", image=image, ref_image=ref_image, num_inference_steps=1, timesteps=[199], guidance_scale=0.0).images[0]
+            output_image = self.difix(
+                prompt="remove degradation",
+                image=image,
+                ref_image=ref_image,
+                num_inference_steps=1,
+                timesteps=[199],
+                guidance_scale=0.0,
+            ).images[0]
             output_image = output_image.resize(image.size, Image.LANCZOS)
             os.makedirs(f"{self.render_dir}/novel/{step}/Fixed", exist_ok=True)
             output_image.save(f"{self.render_dir}/novel/{step}/Fixed/{i:04d}.png")
             if ref_image is not None:
                 os.makedirs(f"{self.render_dir}/novel/{step}/Ref", exist_ok=True)
                 ref_image.save(f"{self.render_dir}/novel/{step}/Ref/{i:04d}.png")
-    
+
         parser = deepcopy(self.parser)
         parser.test_every = 0
-        parser.image_paths = [f"{self.render_dir}/novel/{step}/Fixed/{i:04d}.png" for i in range(len(novel_poses))]
+        parser.image_paths = [
+            f"{self.render_dir}/novel/{step}/Fixed/{i:04d}.png"
+            for i in range(len(novel_poses))
+        ]
         parser.image_names = [os.path.basename(p) for p in parser.image_paths]
-        parser.alpha_mask_paths = [f"{self.render_dir}/novel/{step}/Alpha/{i:04d}.png" for i in range(len(novel_poses))]
+        parser.alpha_mask_paths = [
+            f"{self.render_dir}/novel/{step}/Alpha/{i:04d}.png"
+            for i in range(len(novel_poses))
+        ]
         parser.camtoworlds = novel_poses
         parser.camera_ids = [parser.camera_ids[0]] * len(novel_poses)
-        
+
         print(f"Adding {len(parser.image_paths)} fixed images to novel dataset...")
         dataset = Dataset(parser, split="train")
         dataloader = torch.utils.data.DataLoader(
@@ -908,7 +993,7 @@ class Runner:
         self.novelloaders_iter.append(iter(dataloader))
 
         self.current_novel_poses = novel_poses
-            
+
     @torch.no_grad()
     def eval(self, step: int, stage: str = "val"):
         """Entry for evaluation."""
@@ -961,12 +1046,12 @@ class Runner:
                 colors_canvas = colors.squeeze(0).cpu().numpy()
                 colors_canvas = (colors_canvas * 255).astype(np.uint8)
                 imageio.imwrite(colors_path, colors_canvas)
-                
+
                 alphas_path = f"{self.render_dir}/val/{step}/Alpha/{i:04d}.png"
                 os.makedirs(os.path.dirname(alphas_path), exist_ok=True)
                 alphas_canvas = (alphas < 0.5).squeeze(0).cpu().numpy()
                 alphas_canvas = (alphas_canvas * 255).astype(np.uint8)
-                Image.fromarray(alphas_canvas.squeeze(), mode='L').save(alphas_path)
+                Image.fromarray(alphas_canvas.squeeze(), mode="L").save(alphas_path)
 
                 pixels_p = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
                 colors_p = colors.permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -1044,7 +1129,9 @@ class Runner:
         K = torch.from_numpy(list(self.parser.Ks_dict.values())[0]).float().to(device)
         width, height = list(self.parser.imsize_dict.values())[0]
 
-        for i in tqdm.trange(0, len(camtoworlds_all), batch_size, desc="Rendering trajectory"):
+        for i in tqdm.trange(
+            0, len(camtoworlds_all), batch_size, desc="Rendering trajectory"
+        ):
             camtoworlds = camtoworlds_all[i : i + batch_size]
             Ks = K[None].repeat(camtoworlds.shape[0], 1, 1)
 
@@ -1063,19 +1150,19 @@ class Runner:
                 colors = torch.clamp(renders[j, ..., 0:3], 0.0, 1.0)  # [H, W, 3]
                 depths = renders[j, ..., 3:4]  # [H, W, 1]
                 depths = (depths - depths.min()) / (depths.max() - depths.min())
-                
+
                 idx = i + j
                 colors_path = f"{self.render_dir}/{tag}/{step}/Pred/{idx:04d}.png"
                 os.makedirs(os.path.dirname(colors_path), exist_ok=True)
                 colors_canvas = colors.cpu().numpy()
                 colors_canvas = (colors_canvas * 255).astype(np.uint8)
                 imageio.imwrite(colors_path, colors_canvas)
-                
+
                 alphas_path = f"{self.render_dir}/{tag}/{step}/Alpha/{idx:04d}.png"
                 os.makedirs(os.path.dirname(alphas_path), exist_ok=True)
                 alphas_canvas = alphas[j].float().cpu().numpy()
                 alphas_canvas = (alphas_canvas * 255).astype(np.uint8)
-                Image.fromarray(alphas_canvas.squeeze(), mode='L').save(alphas_path)
+                Image.fromarray(alphas_canvas.squeeze(), mode="L").save(alphas_path)
 
     @torch.no_grad()
     def run_compression(self, step: int):

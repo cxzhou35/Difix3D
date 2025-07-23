@@ -76,6 +76,10 @@ def main():
     # load Difix pipeline
     pipe = DifixPipeline.from_pretrained("nvidia/difix", trust_remote_code=True)
     pipe.to("cuda")
+    # todo: deal with high resolution input images
+    # pipe.enable_vae_slicing()
+    # pipe.enable_vae_tiling()
+    # pipe.enable_xformers_memory_efficient_attention()
 
     # processing
     output_images = []
@@ -98,6 +102,7 @@ def main():
             timesteps=[args.timesteps],
             guidance_scale=args.guidance_scale,
         ).images[0]
+
 
         output_images.append(output_image)
 

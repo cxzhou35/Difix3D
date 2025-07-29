@@ -6,6 +6,7 @@ from os.path import join
 import imageio
 import numpy as np
 from diffusers.utils import load_image
+from PIL import Image
 from tqdm import tqdm
 
 from src.pipeline_difix import DifixPipeline
@@ -94,6 +95,10 @@ def main():
         ref_image = (
             load_image(ref_image_paths[idx]) if args.ref_image is not None else None
         )
+        # resize the ref image to match the shape of the input image (method: bilinear)
+        if ref_image is not None:
+            ref_image = ref_image.resize(input_image.size, Image.Resampling.BILINEAR)
+
         output_image = pipe(
             args.prompt,
             image=input_image,
@@ -102,7 +107,6 @@ def main():
             timesteps=[args.timesteps],
             guidance_scale=args.guidance_scale,
         ).images[0]
-
 
         output_images.append(output_image)
 

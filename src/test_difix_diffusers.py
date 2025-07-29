@@ -9,7 +9,7 @@ from diffusers.utils import load_image
 from PIL import Image
 from tqdm import tqdm
 
-from src.pipeline_difix import DifixPipeline
+from pipeline_difix import DifixPipeline
 
 
 def parse_args():

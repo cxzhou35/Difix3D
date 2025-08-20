@@ -13,6 +13,7 @@ import torch.utils.checkpoint
 import torchvision
 import transformers
 import wandb
+import json
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
@@ -41,6 +42,8 @@ def parse_args():
     parser.add_argument("--train_image_prep", default="resized_crop_512", type=str)
     parser.add_argument("--test_image_prep", default="resized_crop_512", type=str)
     parser.add_argument("--prompt", default=None, type=str)
+    parser.add_argument("--image_width", default=1024, type=int)
+    parser.add_argument("--image_height", default=576, type=int)
 
     # validation eval args
     parser.add_argument("--eval_freq", default=100, type=int)
@@ -102,7 +105,7 @@ def parse_args():
         default=4,
         help="Batch size (per device) for the training dataloader.",
     )
-    parser.add_argument("--num_training_epochs", type=int, default=10)
+    parser.add_argument("--num_training_epochs", type=int, default=100)
     parser.add_argument(
         "--max_train_steps",
         type=int,
@@ -306,7 +309,7 @@ def main(args):
 
     # make train/test dataloaders
     dataset_train = PairedDataset(
-        dataset_path=args.dataset_path, split="train", tokenizer=net_difix.tokenizer
+        dataset_path=args.dataset_path, split="train", tokenizer=net_difix.tokenizer, height=args.image_height, width=args.image_width
     )
     dl_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -315,9 +318,12 @@ def main(args):
         num_workers=args.dataloader_num_workers,
     )
     dataset_val = PairedDataset(
-        dataset_path=args.dataset_path, split="test", tokenizer=net_difix.tokenizer
+        dataset_path=args.dataset_path, split="test", tokenizer=net_difix.tokenizer, height=args.image_height, width=args.image_width
     )
-    random.Random(42).shuffle(dataset_val.img_names)
+
+    # BUG: fix this
+    # random.Random(42).shuffle(dataset_val.img_names)
+    random.Random(42).shuffle(dataset_val.img_ids)
     dl_val = torch.utils.data.DataLoader(
         dataset_val, batch_size=1, shuffle=False, num_workers=0
     )
@@ -611,5 +617,9 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # save args
+    with open(os.path.join(args.output_dir, "args.json"), "w") as f:
+        json.dump(args.__dict__, f, indent=4)
 
     main(args)

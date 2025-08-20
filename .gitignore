@@ -7,9 +7,12 @@ results/*
 checkpoints/*
 eval/*
 models/*
+data/*
 
 *.png
 *.jpeg
 *.jpg
 
 *.pyc
+
+*.zip

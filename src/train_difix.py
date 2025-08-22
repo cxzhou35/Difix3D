@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument("--gram_loss_warmup_steps", default=2000, type=int)
 
     # dataset options
+    parser.add_argument("--root_dir", required=True, type=str)
     parser.add_argument("--dataset_path", required=True, type=str)
     parser.add_argument("--train_image_prep", default="resized_crop_512", type=str)
     parser.add_argument("--test_image_prep", default="resized_crop_512", type=str)
@@ -309,7 +310,7 @@ def main(args):
 
     # make train/test dataloaders
     dataset_train = PairedDataset(
-        dataset_path=args.dataset_path, split="train", tokenizer=net_difix.tokenizer, height=args.image_height, width=args.image_width
+        root_dir=args.root_dir, dataset_path=args.dataset_path, split="train", tokenizer=net_difix.tokenizer, height=args.image_height, width=args.image_width
     )
     dl_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -318,7 +319,7 @@ def main(args):
         num_workers=args.dataloader_num_workers,
     )
     dataset_val = PairedDataset(
-        dataset_path=args.dataset_path, split="test", tokenizer=net_difix.tokenizer, height=args.image_height, width=args.image_width
+        root_dir=args.root_dir, dataset_path=args.dataset_path, split="test", tokenizer=net_difix.tokenizer, height=args.image_height, width=args.image_width
     )
 
     # BUG: fix this
@@ -619,6 +620,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     # save args
+    os.makedirs(args.output_dir, exist_ok=True)
     with open(os.path.join(args.output_dir, "args.json"), "w") as f:
         json.dump(args.__dict__, f, indent=4)
 

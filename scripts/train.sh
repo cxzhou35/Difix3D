@@ -8,7 +8,7 @@ accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu -
     --image_width 1600 \
     --image_height 900 \
     --learning_rate 2e-5 \
-    --train_batch_size 4 \
+    --train_batch_size 2 \
     --dataloader_num_workers 8 \
     --enable_xformers_memory_efficient_attention \
     --max_train_steps 10000 \

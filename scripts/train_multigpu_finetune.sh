@@ -3,9 +3,10 @@ export NUM_GPUS=2
 
 TASK_NAME="0826_train_neemo_mini_finetune_pretrained_difix_ref_model_res_576_1024"
 ROOT_DIR="data/neemo_mini"
-PRETRAINED_MODEL="nvidia/difix_ref"
+# PRETRAINED_MODEL="nvidia/difix_ref"
+PRETRAINED_MODEL="/workspace/codes/Difix3D/pretrained_models/difix_ref"
 
-bake accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu --num_machines $NUM_NODES --num_processes $NUM_GPUS src/train_difix.py \
+accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu --num_machines $NUM_NODES --num_processes $NUM_GPUS src/train_difix.py \
     --output_dir="./outputs/neemo_mini/$TASK_NAME" \
     --root_dir=$ROOT_DIR \
     --dataset_path="$ROOT_DIR/difix_pair_data.json" \

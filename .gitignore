@@ -8,6 +8,7 @@ checkpoints/*
 eval/*
 models/*
 data/*
+pretrained_models/*
 
 *.png
 *.jpeg

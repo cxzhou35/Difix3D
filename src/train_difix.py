@@ -14,6 +14,7 @@ import torchvision
 import transformers
 import wandb
 import json
+import oven
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from diffusers.optimization import get_scheduler
@@ -28,6 +29,13 @@ from dataset import PairedDataset
 from loss import gram_loss
 from model import Difix, load_ckpt_from_state_dict, save_ckpt
 from pipeline_difix import DifixPipeline
+
+def set_env_args():
+    # set proxy mirrors
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+    # os.environ["WANDB_BASE_URL"] = "https://api.bandw.top"
+    os.environ["WANDB_MODE"] = "offline"
+    os.environ["OVEN_HOME"] = "/root/.config/oven"
 
 
 def parse_args():
@@ -414,6 +422,8 @@ def main(args):
         disable=not accelerator.is_local_main_process,
     )
 
+    # oven.notify(f'Training task {args.tracker_run_name} started.')
+
     # start the training loop
     for epoch in range(0, args.num_training_epochs):
         for step, batch in enumerate(dl_train):
@@ -603,14 +613,13 @@ def main(args):
                         torch.cuda.empty_cache()
                     accelerator.log(logs, step=global_step)
 
+    # oven.notify(f"Training task {args.tracker_run_name} completed.")
+
 
 if __name__ == "__main__":
     args = parse_args()
 
-    # set proxy mirrors
-    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-    # os.environ["WANDB_BASE_URL"] = "https://api.bandw.top"
-    os.environ["WANDB_MODE"] = "offline"
+    set_env_args()
 
     # save args
     os.makedirs(args.output_dir, exist_ok=True)

@@ -200,6 +200,61 @@ class Difix(torch.nn.Module):
                 _sd_unet[k] = sd["state_dict_unet"][k]
             unet.load_state_dict(_sd_unet)
 
+        elif pretrained_name is not None:
+            print(f"Loading pretrained model from {pretrained_name}")
+
+            # Load UNet from the pretrained model
+            pretrained_unet = UNet2DConditionModel.from_pretrained(pretrained_name, subfolder="unet", trust_remote_code=True)
+            unet.load_state_dict(pretrained_unet.state_dict())
+
+            # get the target modules for the vae
+            target_modules_vae = [
+                "conv1",
+                "conv2",
+                "conv_in",
+                "conv_shortcut",
+                "conv",
+                "conv_out",
+                "skip_conv_1",
+                "skip_conv_2",
+                "skip_conv_3",
+                "skip_conv_4",
+                "to_k",
+                "to_q",
+                "to_v",
+                "to_out.0",
+            ]
+
+            target_modules = []
+            for id, (name, param) in enumerate(vae.named_modules()):
+                if "decoder" in name and any(
+                    name.endswith(x) for x in target_modules_vae
+                ):
+                    target_modules.append(name)
+            target_modules_vae = target_modules
+
+            # note: freeze the vae encoder
+            vae.encoder.requires_grad_(False)
+
+            # note: load the lora adapter for vae
+            vae_lora_config = LoraConfig(
+                r=lora_rank_vae,
+                init_lora_weights="gaussian",
+                target_modules=target_modules_vae,
+            )
+            vae.add_adapter(vae_lora_config, adapter_name="vae_skip")
+
+            from lora_vae import AutoencoderKL as PretrainedAutoencoderKL
+            pretrained_vae = PretrainedAutoencoderKL.from_pretrained(pretrained_name, subfolder="vae", trust_remote_code=True)
+
+            # load the pretrained vae
+            vae.load_state_dict(pretrained_vae.state_dict())
+
+            # breakpoint()
+
+            self.lora_rank_vae = lora_rank_vae
+            self.target_modules_vae = target_modules_vae
+
         elif pretrained_name is None and pretrained_path is None:
             print("Initializing model with random weights")
             target_modules_vae = []
@@ -379,11 +434,7 @@ class Difix(torch.nn.Module):
         sd = {}
         sd["vae_lora_target_modules"] = self.target_modules_vae
         sd["rank_vae"] = self.lora_rank_vae
-        sd["state_dict_unet"] = {
-            k: v
-            for k, v in self.unet.state_dict().items()
-            if "lora" in k or "conv_in" in k
-        }
+        sd["state_dict_unet"] = self.unet.state_dict()
         sd["state_dict_vae"] = {
             k: v for k, v in self.vae.state_dict().items() if "lora" in k or "skip" in k
         }

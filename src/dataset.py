@@ -66,6 +66,7 @@ class PairedDataset(torch.utils.data.Dataset):
             "output_pixel_values": output_t,
             "conditioning_pixel_values": img_t,
             "caption": caption,
+            "data_id": img_id,
         }
 
         if self.tokenizer is not None:

@@ -27,6 +27,7 @@ from tqdm.auto import tqdm
 from dataset import PairedDataset
 from loss import gram_loss
 from model import Difix, load_ckpt_from_state_dict, save_ckpt
+from pipeline_difix import DifixPipeline
 
 
 def parse_args():
@@ -71,6 +72,8 @@ def parse_args():
 
     # details about the model architecture
     parser.add_argument("--pretrained_model_name_or_path")
+    parser.add_argument("--pretrained_name", type=str, default=None)
+    parser.add_argument("--pretrained_path", type=str, default=None)
     parser.add_argument(
         "--revision",
         type=str,
@@ -251,11 +254,13 @@ def main(args):
         lora_rank_vae=args.lora_rank_vae,
         timestep=args.timestep,
         mv_unet=args.mv_unet,
+        pretrained_name=args.pretrained_name,
+        pretrained_path=args.pretrained_path,
     )
-    net_difix.set_train()
 
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
+            print("Enabling xformers memory efficient attention")
             net_difix.unet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError(
@@ -263,6 +268,7 @@ def main(args):
             )
 
     if args.gradient_checkpointing:
+        print("Enabling gradient checkpointing")
         net_difix.unet.enable_gradient_checkpointing()
 
     if args.allow_tf32:
@@ -417,13 +423,18 @@ def main(args):
                 x_tgt = batch["output_pixel_values"]  # target image (gt)
                 B, V, C, H, W = x_src.shape
 
+                # data_id = batch["data_id"][0]
+                # print(f"data_id: {data_id}")
+
                 # forward pass
                 x_tgt_pred = net_difix(
                     x_src, prompt_tokens=batch["input_ids"]
                 )  # model predicted image
 
                 x_tgt = rearrange(x_tgt, "b v c h w -> (b v) c h w")
+                x_tgt = x_tgt.contiguous()
                 x_tgt_pred = rearrange(x_tgt_pred, "b v c h w -> (b v) c h w")
+                x_tgt_pred = x_tgt_pred.contiguous()
 
                 # Reconstruction loss
                 loss_l2 = (
@@ -471,7 +482,9 @@ def main(args):
                 optimizer.zero_grad(set_to_none=args.set_grads_to_none)
 
                 x_tgt = rearrange(x_tgt, "(b v) c h w -> b v c h w", v=V)
+                x_tgt = x_tgt.contiguous()
                 x_tgt_pred = rearrange(x_tgt_pred, "(b v) c h w -> b v c h w", v=V)
+                x_tgt_pred = x_tgt_pred.contiguous()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -492,32 +505,21 @@ def main(args):
                         log_dict = {
                             "train/source": [
                                 wandb.Image(
-                                    rearrange(x_src, "b v c h w -> b c (v h) w")[idx]
-                                    .float()
-                                    .detach()
-                                    .cpu(),
+                                    rearrange(x_src, "b v c h w -> b c (v h) w")[idx].float().detach().cpu(),
                                     caption=f"idx={idx}",
                                 )
                                 for idx in range(B)
                             ],
                             "train/target": [
                                 wandb.Image(
-                                    rearrange(x_tgt, "b v c h w -> b c (v h) w")[idx]
-                                    .float()
-                                    .detach()
-                                    .cpu(),
+                                    rearrange(x_tgt, "b v c h w -> b c (v h) w")[idx].float().detach().cpu(),
                                     caption=f"idx={idx}",
                                 )
                                 for idx in range(B)
                             ],
                             "train/model_output": [
                                 wandb.Image(
-                                    rearrange(x_tgt_pred, "b v c h w -> b c (v h) w")[
-                                        idx
-                                    ]
-                                    .float()
-                                    .detach()
-                                    .cpu(),
+                                    rearrange(x_tgt_pred, "b v c h w -> b c (v h) w")[idx].float().detach().cpu(),
                                     caption=f"idx={idx}",
                                 )
                                 for idx in range(B)
@@ -529,10 +531,11 @@ def main(args):
                     # checkpoint the model
                     if global_step % args.checkpointing_steps == 1:
                         outf = os.path.join(
-                            args.output_dir, "checkpoints", f"model_{global_step}.pkl"
+                            args.output_dir, "checkpoints", f"model_iter_{global_step:06d}.pkl"
                         )
                         # accelerator.unwrap_model(net_difix).save_model(outf)
                         save_ckpt(accelerator.unwrap_model(net_difix), optimizer, outf)
+                        print(f"Checkpoint saved to {outf}")
 
                     # compute validation set L2, LPIPS
                     if args.eval_freq > 0 and global_step % args.eval_freq == 1:
@@ -562,34 +565,19 @@ def main(args):
                                 if step % 10 == 0:
                                     log_dict["sample/source"].append(
                                         wandb.Image(
-                                            rearrange(
-                                                x_src, "b v c h w -> b c (v h) w"
-                                            )[0]
-                                            .float()
-                                            .detach()
-                                            .cpu(),
+                                            rearrange(x_src, "b v c h w -> b c (v h) w")[0].float().detach().cpu(),
                                             caption=f"idx={len(log_dict['sample/source'])}",
                                         )
                                     )
                                     log_dict["sample/target"].append(
                                         wandb.Image(
-                                            rearrange(
-                                                x_tgt, "b v c h w -> b c (v h) w"
-                                            )[0]
-                                            .float()
-                                            .detach()
-                                            .cpu(),
+                                            rearrange(x_tgt, "b v c h w -> b c (v h) w")[0].float().detach().cpu(),
                                             caption=f"idx={len(log_dict['sample/source'])}",
                                         )
                                     )
                                     log_dict["sample/model_output"].append(
                                         wandb.Image(
-                                            rearrange(
-                                                x_tgt_pred, "b v c h w -> b c (v h) w"
-                                            )[0]
-                                            .float()
-                                            .detach()
-                                            .cpu(),
+                                            rearrange(x_tgt_pred, "b v c h w -> b c (v h) w")[0].float().detach().cpu(),
                                             caption=f"idx={len(log_dict['sample/source'])}",
                                         )
                                     )
@@ -618,6 +606,11 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # set proxy mirrors
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+    # os.environ["WANDB_BASE_URL"] = "https://api.bandw.top"
+    os.environ["WANDB_MODE"] = "offline"
 
     # save args
     os.makedirs(args.output_dir, exist_ok=True)

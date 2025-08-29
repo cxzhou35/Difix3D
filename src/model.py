@@ -184,6 +184,7 @@ class Difix(torch.nn.Module):
         )
 
         if pretrained_path is not None:
+            print(f"Loading pretrained model from {pretrained_path}")
             sd = torch.load(pretrained_path, map_location="cpu")
             vae_lora_config = LoraConfig(
                 r=sd["rank_vae"],

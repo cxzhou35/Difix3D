@@ -2,7 +2,7 @@ export NUM_NODES=1
 export NUM_GPUS=2
 
 accelerate launch --mixed_precision=bf16 --main_process_port 29501 --multi_gpu --num_machines $NUM_NODES --num_processes $NUM_GPUS src/train_difix.py \
-    --output_dir=./outputs/neemo_mini/difix_full_tune_train_multigpu \
+    --output_dir=./outputs/neemo_mini/difix_full_tune_train_multi_gpu \
     --root_dir="data/neemo_mini" \
     --dataset_path="data/neemo_mini/difix_pair_data.json" \
     --resolution 512 \

@@ -1,7 +1,7 @@
 TASK_NAME="train_debug_single_gpu"
 ROOT_DIR="data/neemo_mini"
 
-bake accelerate launch --mixed_precision=bf16 --main_process_port 29501 src/train_difix.py \
+accelerate launch --mixed_precision=bf16 --main_process_port 29501 src/train_difix.py \
     --output_dir="./outputs/debug/$TASK_NAME" \
     --root_dir=$ROOT_DIR \
     --dataset_path="$ROOT_DIR/difix_pair_data_test.json" \

@@ -102,7 +102,7 @@ def get_evc_meta(img_path: str):
     return view_id, frame_id
 
 
-def save_evc_img_path(img, output_path: str, view_id: str, frame_id: str):
+def save_evc_img_path(output_path: str, view_id: str, frame_id: str):
     assert os.path.exists(output_path), "Save path does not exist"
     view_save_dir = os.path.join(output_path, "images", f"{int(view_id):02d}")
     os.makedirs(view_save_dir, exist_ok=True)
@@ -147,7 +147,7 @@ def main():
             view_id, frame_id = get_evc_meta(input_image)
             ref_view_id = REF_VIEW_DICT[view_id]
             ref_image_path = os.path.join(args.ref_path, f"{int(ref_view_id):02d}_{int(frame_id):06d}.png")
-            output_image_path = save_evc_img_path(image, args.output_path, view_id, frame_id)
+            output_image_path = save_evc_img_path(args.output_path, view_id, frame_id)
         else:
             ref_image_path = ref_images[idx]
             output_image_dir = os.path.join(args.output_path, "images")
